@@ -8,6 +8,7 @@ from typing import Dict,Union
 from typing import List, NamedTuple, Text
 from urllib.parse import quote, urljoin
 from bisect import bisect_left
+from telebot.types import ReplyKeyboardRemove
 
 
 import pygame
@@ -25,6 +26,10 @@ Telegram bot connection
 
 """
 bot = telebot.TeleBot("7029972165:AAHBdv6qQSwOGk0kLtlJl-pdvuYApAVIF2M")
+
+
+
+
 
 API_BASE = os.getenv("API_BASE", "https://framex-dev.wadrid.net/api/")
 VIDEO_NAME = os.getenv(
@@ -262,7 +267,7 @@ Global variables to maintain the state and index of the current frame
 confirmed_launch = False
 markup = None
 bisector = FrameXBisector(VIDEO_NAME)
-current_frame_index = random.randint(1, 60000)
+current_frame_index = random.randint(10000, 20000)
 MAX_ATTEMPTS = 15
 
 """
@@ -278,6 +283,7 @@ List to store the frames
 
 frames = []
 positive_responses_count = 0
+
 
 
 
@@ -303,7 +309,7 @@ def handle_launch(message):
 
 """Function to generate an index using the bisection algorithm"""
 def generate_bisection_index(current_index, confirmation_count):
-    if confirmation_count < 3:
+    if confirmation_count < 1:
         range_start = 0
         range_end = 59000
     else:
@@ -330,11 +336,24 @@ def handle_confirmation(message):
         frames.append(current_frame_index)
         bot.send_message(message.chat.id, "The rocket has already launched! 🚀🌌")
         print("Número de respuestas afirmativas:", positive_responses_count, "Fotograma actual:", current_frame_index)
+        
+
+        if positive_responses_count < 12:
+            current_frame_index -= random.randint(100, 1000)
+        else:
+            current_frame_index -= random.randint(0, 300)
+
     elif message.text.lower() == 'no':
         positive_responses_count += 1
         bot.send_message(message.chat.id, "The rocket has not yet launched. 🌍" )
-        print("Número de respuestas afirmativas:", positive_responses_count, "Fotograma actual:", current_frame_index)
-        current_frame_index += 10000
+        print("Número de respuestas Negativas:", positive_responses_count, "Fotograma actual:", current_frame_index)
+        
+        if positive_responses_count < 9:
+            current_frame_index += random.randint(5000, 10000)
+        elif positive_responses_count > 12:
+            current_frame_index += random.randint(0, 1000)
+        else:
+            current_frame_index += random.randint(1000, 2000)
     
     if positive_responses_count < MAX_ATTEMPTS:
         bot.send_message(message.chat.id, "Displaying another frame...")
@@ -346,11 +365,14 @@ def handle_confirmation(message):
         send_image_and_confirm(current_frame_index, message.chat.id)
         bot.send_message(message.chat.id, f"🚀🌌The rocket was launched in frame:🚀🌌 {current_frame_index}")
         bot.send_message(message.chat.id, "Thank you for using our service. Goodbye! 👋")
-        states[message.chat.id] = "idle"
         positive_responses_count = 0
-        handle_start(message) 
+        states[message.chat.id] = "idle"
 
-   
+        show_launch_keyboard(message.chat.id)
+
+
+
+
    
 """Function to send the image to the user and ask again"""
 def send_image_and_confirm(index, chat_id):
@@ -371,6 +393,11 @@ def send_image_and_confirm(index, chat_id):
 
 @bot.message_handler(commands=['start'])
 def handle_start(message):
+    global frames, positive_responses_count
+    
+    # Reiniciar los contadores y los fotogramas
+    frames = []
+    positive_responses_count = 0
     markup = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True)
     bot.send_message(message.chat.id, "🚀¡Hello!🚀\nWelcome to the bot, to find out in which frame the rocket has been launched. Would you like to see information about the rocket launch?", reply_markup=markup)
     show_launch_keyboard(message.chat.id)
@@ -397,7 +424,7 @@ def handle_all_messages(message):
     elif message.text.lower() == "no":
         handle_confirmation(message)
     else:
-        bot.reply_to(message, "I didn't understand that command. You can try /start, /launch")
+        bot.reply_to(message, "I didn't understand that command. You can try /start, /launch, /exit")
 
 
 # Run the bot
