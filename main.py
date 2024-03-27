@@ -2,6 +2,7 @@ import io
 import os
 import telebot
 import random 
+import time  
 from io import BytesIO
 from telebot import types
 from typing import Dict,Union
@@ -9,16 +10,11 @@ from typing import List, NamedTuple, Text
 from urllib.parse import quote, urljoin
 from bisect import bisect_left
 from telebot.types import ReplyKeyboardRemove
-
-
+from telebot import types
 import pygame
 from httpx import Client
 from PIL import Image
 from PyInquirer import prompt
-
-
-
-
 
 
 """
@@ -26,9 +22,6 @@ Telegram bot connection
 
 """
 bot = telebot.TeleBot("7029972165:AAHBdv6qQSwOGk0kLtlJl-pdvuYApAVIF2M")
-
-
-
 
 
 API_BASE = os.getenv("API_BASE", "https://framex-dev.wadrid.net/api/")
@@ -193,71 +186,64 @@ class FrameXBisector:
         self.image.blit(disp)
 
 
-def confirm(title):
-    """
-    Asks a yes/no question to the user
-    """
 
-    return prompt(
-        [
-            {
-                "type": "confirm",
-                "name": "confirm",
-                "message": f"{title} - did the rocket launch yet?",
-            }
-        ]
-    )["confirm"]
+def confirm(bot, chat_id, title):
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
+    item_btn_yes = types.KeyboardButton('Yes')
+    item_btn_no = types.KeyboardButton('No')
+    markup.row(item_btn_yes, item_btn_no)
+    
+    bot.send_message(chat_id, f"{title} - Did the rocket launch yet?", reply_markup=markup)
 
 
 
-
-
-    """
-    Runs a bisection algorithm on the frames of the video, the goal is
-    to figure at which exact frame the rocket takes off.
-
-    Images are displayed using pygame, but the interactivity happens in
-    the terminal as it is much easier to do.
-    """
-
-    pygame.init()
-
+# Inicializar la variable states
+states: Dict[int, str] = {}
+def main(chat_id):
     bisector = FrameXBisector(VIDEO_NAME)
-    disp = pygame.display.set_mode(DISPLAY_SIZE)
 
     def mapper(n):
-        """
-        In that case there is no need to map (or rather, the mapping
-        is done visually by the user)
-        """
-
         return n
 
-    def tester(n):
-        """
-        Displays the current candidate to the user and asks them to
-        check if they see wildfire damages.
-        """
-
+    def tester(n, chat_id):
         bisector.index = n
-        disp.fill(BLACK)
-        bisector.blit(disp)
-        pygame.display.update()
 
-        return confirm(bisector.index)
+        frame_data = io.BytesIO(bisector.image.data)
+        bot.send_photo(chat_id, frame_data, caption=f"Frame Candidate: {n}")
+        confirm(bot, chat_id, "")
+        print("pasa por aca ?", bisector.index)
 
-    culprit = bisect(bisector.count, mapper, tester)
+        # Esperar la respuesta del usuario
+        while True:
+            time.sleep(5)
+            if states.get(chat_id) in ['yes', 'no']:
+                break
+
+        return states.get(chat_id) == 'yes'
+
+    culprit = bisect(bisector.count, mapper, lambda n: tester(n, chat_id))
     bisector.index = culprit
 
-    print(f"Found! Take-off = {bisector.index}")
+    final_frame_data = io.BytesIO(bisector.image.data)
+    bot.send_photo(chat_id, final_frame_data, caption=f"Final Frame: {culprit}")
+    bot.send_message(chat_id, f"Found! Take-off = {culprit}")
 
-    pygame.quit()
-    exit()
+# Función para manejar la respuesta del usuario
+@bot.message_handler(func=lambda message: message.text.lower() in ['yes', 'no'])
+def handle_confirmation(message):
+    chat_id = message.chat.id
+    states[chat_id] = message.text.lower()
+    print("Respuesta del usuario recibida:", states[chat_id])
 
+    
+    
 
 #------------------------------------------------------------------
 
-
+def handle_launch(message): 
+    bot.send_message(message.chat.id, "Searching for the frame where the rocket takes off...")
+    takeoff_frame = main(message.chat.id,"")  
+    confirm(bot, message.chat.id)
 
 """
 
@@ -284,123 +270,29 @@ List to store the frames
 frames = []
 positive_responses_count = 0
 
+def handle_confirmation(message):
+    # Retrieve the confirmation state ('yes' or 'no') from the user's message.
+    confirmation = message.text.lower()
+    states[message.chat.id] = confirmation
 
-
-
-"""Handler for the /launch command"""
 @bot.message_handler(commands=['launch'])
 def handle_launch(message):
-    markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
-    item_btn_yes = types.KeyboardButton('Yes')
-    item_btn_no = types.KeyboardButton('No')
-    markup.row(item_btn_yes, item_btn_no)  
-    bot.send_message(message.chat.id, "Has the rocket already launched?", reply_markup=markup)
     
+    bot.send_message(message.chat.id, "Searching for the frame where the rocket takes off...")
 
-    """Call the function to send the image and ask again"""
-    send_image_and_confirm(current_frame_index, message.chat.id)
-    
-
-    """Set the conversation state for this user"""
-    states[message.chat.id] = "waiting_for_confirmation"
-
-
-
-
-"""Function to generate an index using the bisection algorithm"""
-def generate_bisection_index(current_index, confirmation_count):
-    if confirmation_count < 1:
-        range_start = 0
-        range_end = 59000
-    else:
-        range_start = max(0, current_index - (MAX_ATTEMPTS - confirmation_count) * 500)
-        range_end = min(59000, current_index + (MAX_ATTEMPTS - confirmation_count) * 500)
-
-    midpoint = (range_start + range_end) // 2
-    if current_index > midpoint:
-        midpoint = (current_index + range_end) // 2
-    else:
-        midpoint = (current_index + range_start) // 2
-
-    return midpoint
-
-
-"""Function to handle confirmation messages"""
-@bot.message_handler(func=lambda message: states.get(message.chat.id) == "waiting_for_confirmation")
-def handle_confirmation(message):
-    global current_frame_index, positive_responses_count  
-    
-    if message.text.lower() == 'yes':
-        positive_responses_count += 1
-        
-        frames.append(current_frame_index)
-        bot.send_message(message.chat.id, "The rocket has already launched! 🚀🌌")
-        print("Número de respuestas afirmativas:", positive_responses_count, "Fotograma actual:", current_frame_index)
-        
-
-        if positive_responses_count < 12:
-            current_frame_index -= random.randint(100, 1000)
-        else:
-            current_frame_index -= random.randint(0, 300)
-
-    elif message.text.lower() == 'no':
-        positive_responses_count += 1
-        bot.send_message(message.chat.id, "The rocket has not yet launched. 🌍" )
-        print("Número de respuestas Negativas:", positive_responses_count, "Fotograma actual:", current_frame_index)
-        
-        if positive_responses_count < 9:
-            current_frame_index += random.randint(5000, 10000)
-        elif positive_responses_count > 12:
-            current_frame_index += random.randint(0, 1000)
-        else:
-            current_frame_index += random.randint(1000, 2000)
-    
-    if positive_responses_count < MAX_ATTEMPTS:
-        bot.send_message(message.chat.id, "Displaying another frame...")
-        current_index = generate_bisection_index(current_frame_index, positive_responses_count)
-        send_image_and_confirm(current_index, message.chat.id)
-        states[message.chat.id] = "waiting_for_response"
-        bot.send_message(message.chat.id, "Please respond with 'Yes' or 'No'.")
-    else:
-        send_image_and_confirm(current_frame_index, message.chat.id)
-        bot.send_message(message.chat.id, f"🚀🌌The rocket was launched in frame:🚀🌌 {current_frame_index}")
-        bot.send_message(message.chat.id, "Thank you for using our service. Goodbye! 👋")
-        positive_responses_count = 0
-        states[message.chat.id] = "idle"
-
-        show_launch_keyboard(message.chat.id)
-
-
-
-
-   
-"""Function to send the image to the user and ask again"""
-def send_image_and_confirm(index, chat_id):
-    global current_frame_index  
-    # Get the frame corresponding to the index
-    frame_data = bisector.api.video_frame(bisector.video.name, index)
-    markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
-    item_btn_custom_yes = types.KeyboardButton('yes')
-    item_btn_custom_no = types.KeyboardButton('no')
-    markup.row(item_btn_custom_yes, item_btn_custom_no)  # Add the custom tags to the same row
-
-    #Send the image to the user
-
-    bot.send_photo(chat_id, frame_data, caption=f"Frame {index}")
-
-    current_frame_index = index  
+    # Execute the bisection algorithm to find the takeoff frame.
+    main(message.chat.id)   
+    show_launch_keyboard(message.chat.id)
 
 
 @bot.message_handler(commands=['start'])
 def handle_start(message):
     global frames, positive_responses_count
-    
-    # Reiniciar los contadores y los fotogramas
-    frames = []
-    positive_responses_count = 0
     markup = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True)
     bot.send_message(message.chat.id, "🚀¡Hello!🚀\nWelcome to the bot, to find out in which frame the rocket has been launched. Would you like to see information about the rocket launch?", reply_markup=markup)
     show_launch_keyboard(message.chat.id)
+
+
 
 
 """Function to display the launch keyboard"""
@@ -416,7 +308,6 @@ def show_launch_keyboard(chat_id):
 def handle_all_messages(message):
     if message.text.lower() == 'exit':
         bot.send_message(message.chat.id, "¡Exit!")
-        handle_start(message)
     elif message.text.lower() == 'launch':
         handle_launch(message)
     elif message.text.lower() == "yes":
