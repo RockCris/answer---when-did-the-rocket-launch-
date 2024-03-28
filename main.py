@@ -10,7 +10,6 @@ from typing import List, NamedTuple, Text
 from urllib.parse import quote, urljoin
 from bisect import bisect_left
 from telebot.types import ReplyKeyboardRemove
-import pygame
 from httpx import Client
 from PIL import Image
 from PyInquirer import prompt
