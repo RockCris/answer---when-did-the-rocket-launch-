@@ -7,7 +7,7 @@ authors = ["Your Name <you@example.com>"]
 [tool.poetry.dependencies]
 # necessary for pygame!
 python = ">=3.8.0,<=3.12.2"
-pygame = "^2.1.2"
+pygame = "^2.0.1"
 dearpygui = "^1.6.2"
 
 # these were available in legacy repls. might be helpful to add
